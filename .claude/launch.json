@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "mapa-web",
+      "runtimeExecutable": "powershell",
+      "runtimeArgs": ["-NoProfile", "-Command", "Set-Location mapa; flutter run -d web-server --web-port 8080 --release"],
+      "port": 8080
+    },
+    {
+      "name": "mapa-web-debug",
+      "runtimeExecutable": "powershell",
+      "runtimeArgs": ["-NoProfile", "-Command", "Set-Location mapa; flutter run -d web-server --web-port 8090"],
+      "port": 8090
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Mapa de Locais (Chrome, rápido)",
+      "type": "dart",
+      "request": "launch",
+      "cwd": "mapa",
+      "program": "lib/main.dart",
+      "deviceId": "chrome",
+      "flutterMode": "release"
+    },
+    {
+      "name": "Mapa de Locais (Chrome, debug)",
+      "type": "dart",
+      "request": "launch",
+      "cwd": "mapa",
+      "program": "lib/main.dart",
+      "deviceId": "chrome"
+    }
+  ]
+}

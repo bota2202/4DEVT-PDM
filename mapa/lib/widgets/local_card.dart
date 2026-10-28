@@ -1,6 +1,17 @@
 import 'package:flutter/material.dart';
 import '../models/local.dart';
 
+IconData iconeCategoria(String categoria) {
+  switch (categoria) {
+    case 'Academia': return Icons.fitness_center;
+    case 'Restaurante': return Icons.restaurant;
+    case 'Hospital': return Icons.local_hospital;
+    case 'Clínica': return Icons.medical_services;
+    case 'Esportes': return Icons.sports_soccer;
+    default: return Icons.place;
+  }
+}
+
 class LocalCard extends StatelessWidget {
   final Local local;
   final VoidCallback onTap;
@@ -9,16 +20,7 @@ class LocalCard extends StatelessWidget {
 
   const LocalCard({super.key, required this.local, required this.onTap, required this.onEdit, required this.onDelete});
 
-  IconData get icon {
-    switch (local.categoria) {
-      case 'Academia': return Icons.fitness_center;
-      case 'Restaurante': return Icons.restaurant;
-      case 'Hospital': return Icons.local_hospital;
-      case 'Clínica': return Icons.medical_services;
-      case 'Esportes': return Icons.sports_soccer;
-      default: return Icons.place;
-    }
-  }
+  IconData get icon => iconeCategoria(local.categoria);
 
   @override
   Widget build(BuildContext context) {

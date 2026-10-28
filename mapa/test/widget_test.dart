@@ -1,30 +1,46 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
-import 'package:mapa/main.dart';
+import 'package:mapa/models/local.dart';
+import 'package:mapa/services/local_service.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  test('Local converte para Map e volta sem perder dados', () {
+    final local = locaisIniciais[1];
+    final copia = Local.fromMap('abc', local.toMap());
+    expect(copia.id, 'abc');
+    expect(copia.toMap(), local.toMap());
+  });
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+  test('fromMap aceita inteiros e campos ausentes', () {
+    final local = Local.fromMap('x', {'nome': 'A', 'avaliacao': 4});
+    expect(local.avaliacao, 4.0);
+    expect(local.favorito, false);
+    expect(local.cidade, '');
+    expect(local.telefone, '');
+  });
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+  test('documento antigo sem coordenadas fica no centro da cidade', () {
+    final local = Local.fromMap('x', {'nome': 'A', 'cidade': 'Campinas'});
+    expect(local.posicao, centroDe('Campinas'));
+  });
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+  test('ponto segurado no mapa escolhe a cidade mais próxima', () {
+    for (final l in locaisIniciais) {
+      expect(cidadeMaisProxima(l.posicao), l.cidade, reason: l.nome);
+    }
+  });
+
+  test('T02 pesquisa por "Academia"', () {
+    final r = filtrarLocais(locaisIniciais, texto: 'academia');
+    expect(r.length, 5);
+    expect(r.map((e) => e.distancia), [1.2, 2.4, 3.1, 4.7, 5.2]); // ordenado do mais perto
+  });
+
+  test('T03 cidade Campinas', () {
+    expect(filtrarLocais(locaisIniciais, cidade: 'Campinas').map((e) => e.nome), ['Restaurante Sabor', 'Hospital Central']);
+  });
+
+  test('T04 categoria + cidade + favoritos', () {
+    expect(filtrarLocais(locaisIniciais, cidade: 'Jundiaí', categoria: 'Restaurante').single.nome, 'Restaurante Paulista');
+    expect(filtrarLocais(locaisIniciais, apenasFavoritos: true).single.nome, 'Smart Fit');
   });
 }

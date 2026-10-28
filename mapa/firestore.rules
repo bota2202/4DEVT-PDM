@@ -1,0 +1,35 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Só os campos do modelo, com tipos e tamanhos válidos.
+    // lat, lng e telefone são opcionais (documentos antigos não têm).
+    function localValido(d) {
+      return d.keys().hasOnly(['nome', 'categoria', 'cidade', 'avaliacao', 'distancia', 'horario', 'descricao', 'favorito', 'lat', 'lng', 'telefone'])
+        && d.nome is string && d.nome.size() > 0 && d.nome.size() <= 100
+        && d.categoria is string && d.categoria.size() <= 50
+        && d.cidade in ['São Paulo', 'Campinas', 'Jundiaí']
+        && d.avaliacao is number && d.avaliacao >= 0 && d.avaliacao <= 5
+        && d.distancia is number && d.distancia >= 0
+        && d.horario is string && d.horario.size() <= 50
+        && d.descricao is string && d.descricao.size() <= 1000
+        && d.favorito is bool
+        && (!('lat' in d) || (d.lat is number && d.lat >= -90 && d.lat <= 90))
+        && (!('lng' in d) || (d.lng is number && d.lng >= -180 && d.lng <= 180))
+        && (!('telefone' in d) || (d.telefone is string && d.telefone.size() <= 30));
+    }
+
+    match /locais/{id} {
+      allow read: if true;
+      allow create, update: if localValido(request.resource.data);
+      allow delete: if true;
+      // Extensão (nível 3 – autenticação): trocar create/update/delete por
+      //   if request.auth != null && localValido(...)
+    }
+
+    // Qualquer outra coleção fica bloqueada.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

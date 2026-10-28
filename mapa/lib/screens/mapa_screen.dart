@@ -1,7 +1,22 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:latlong2/latlong.dart';
+import 'package:url_launcher/url_launcher.dart';
+import '../dialogs/confirm_delete.dart';
+import '../dialogs/feedback.dart';
 import '../models/local.dart';
 import '../services/local_service.dart';
+import '../widgets/local_card.dart';
+import '../widgets/local_form.dart';
+import 'detalhes_screen.dart';
 import 'resultados_screen.dart';
+
+// "Ver no mapa" (tela de detalhes) coloca o local aqui; o mapa centraliza nele.
+final focoNoMapa = ValueNotifier<Local?>(null);
+
+const _tilesMapa = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+const _tilesSatelite = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
 
 class MapaScreen extends StatefulWidget {
   const MapaScreen({super.key});
@@ -9,14 +24,59 @@ class MapaScreen extends StatefulWidget {
 }
 
 class _MapaScreenState extends State<MapaScreen> {
-  final service = LocalService.instance;
+  final locais = LocalService().listarLocais();
   final pesquisa = TextEditingController();
+  final mapa = MapController();
   String cidade = 'São Paulo';
+  String? selecionadoId;
+  LatLng? minhaPosicao;
+  bool satelite = false;
 
-  @override void dispose() { pesquisa.dispose(); super.dispose(); }
+  @override
+  void initState() {
+    super.initState();
+    focoNoMapa.addListener(_focar);
+  }
 
-  void abrirResultados() {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => ResultadosScreen(cidadeInicial: cidade, pesquisaInicial: pesquisa.text))).then((_) => setState(() {}));
+  @override
+  void dispose() {
+    focoNoMapa.removeListener(_focar);
+    pesquisa.dispose();
+    mapa.dispose();
+    super.dispose();
+  }
+
+  void _focar() {
+    final local = focoNoMapa.value;
+    if (local == null) return;
+    focoNoMapa.value = null;
+    setState(() { cidade = local.cidade; selecionadoId = local.id; });
+    mapa.move(local.posicao, 16);
+  }
+
+  void trocarCidade(String nova) {
+    setState(() { cidade = nova; selecionadoId = null; });
+    mapa.move(centroDe(nova), 13);
+  }
+
+  Future<void> minhaLocalizacao() async {
+    if (!await Geolocator.isLocationServiceEnabled()) throw 'a localização do aparelho está desligada';
+    var permissao = await Geolocator.checkPermission();
+    if (permissao == LocationPermission.denied) permissao = await Geolocator.requestPermission();
+    if (permissao == LocationPermission.denied || permissao == LocationPermission.deniedForever) throw 'permissão de localização negada';
+    final pos = await Geolocator.getCurrentPosition();
+    setState(() => minhaPosicao = LatLng(pos.latitude, pos.longitude));
+    mapa.move(minhaPosicao!, 15);
+  }
+
+  void abrirResultados({bool favoritos = false}) {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => ResultadosScreen(cidadeInicial: favoritos ? 'Todas' : cidade, pesquisaInicial: favoritos ? '' : pesquisa.text, apenasFavoritos: favoritos)));
+  }
+
+  void abrirDetalhes(Local local) => Navigator.push(context, MaterialPageRoute(builder: (_) => DetalhesScreen(localId: local.id)));
+
+  void cadastrarAqui(LatLng ponto) {
+    showModalBottomSheet(context: context, isScrollControlled: true, showDragHandle: true, builder: (_) => LocalForm(posicao: ponto, onSave: (local) => executarComMensagem(context, LocalService().adicionar(local), 'Local cadastrado!')));
   }
 
   @override
@@ -24,64 +84,61 @@ class _MapaScreenState extends State<MapaScreen> {
     return Scaffold(
       body: SafeArea(child: Column(children: [
         Padding(padding: const EdgeInsets.fromLTRB(18, 12, 18, 8), child: Column(children: [
-          Row(children: [const Icon(Icons.location_on_outlined, size: 24), const SizedBox(width: 8), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Cidade selecionada', style: TextStyle(fontSize: 11, color: Colors.grey.shade600)), DropdownButtonHideUnderline(child: DropdownButton<String>(value: cidade, isDense: true, items: const [DropdownMenuItem(value: 'São Paulo', child: Text('São Paulo')), DropdownMenuItem(value: 'Campinas', child: Text('Campinas')), DropdownMenuItem(value: 'Jundiaí', child: Text('Jundiaí'))], onChanged: (v) => setState(() => cidade = v!))) ]))]),
+          Row(children: [const Icon(Icons.location_on_outlined, size: 24), const SizedBox(width: 8), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Cidade selecionada', style: TextStyle(fontSize: 11, color: Colors.grey.shade600)), DropdownButtonHideUnderline(child: DropdownButton<String>(value: cidade, isDense: true, items: centrosCidades.keys.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(), onChanged: (v) => trocarCidade(v!)))]))]),
           const SizedBox(height: 6),
-          TextField(controller: pesquisa, onSubmitted: (_) => abrirResultados(), decoration: InputDecoration(hintText: 'Buscar locais, endereços ou categorias...', prefixIcon: const Icon(Icons.search), suffixIcon: IconButton(onPressed: abrirResultados, icon: const Icon(Icons.arrow_forward)), border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: Colors.grey.shade300)), filled: true, fillColor: Colors.grey.shade50)),
+          TextField(controller: pesquisa, onChanged: (_) => setState(() {}), onSubmitted: (_) => abrirResultados(), decoration: InputDecoration(hintText: 'Buscar por nome ou categoria...', prefixIcon: const Icon(Icons.search), suffixIcon: IconButton(tooltip: 'Ver resultados', onPressed: abrirResultados, icon: const Icon(Icons.arrow_forward)), border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: Colors.grey.shade300)), filled: true, fillColor: Colors.grey.shade50)),
         ])),
-        Expanded(child: Stack(children: [
-          const _FakeMap(),
-          Positioned(top: 20, left: 16, child: _MapLabel(text: 'Academia Fitness', icon: Icons.fitness_center)),
-          Positioned(top: 105, right: 35, child: _MapMarker(color: Colors.red.shade700)),
-          Positioned(top: 185, left: 48, child: _MapMarker(color: Colors.black87)),
-          Positioned(top: 250, right: 65, child: _MapMarker(color: Colors.black87)),
-          Positioned(bottom: 135, left: 90, child: _MapMarker(color: Colors.black87)),
-          Positioned(
-            top: 180,
-            left: MediaQuery.of(context).size.width / 2 - 18,
-            child: Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: Colors.blue.withValues(alpha: .15),
-                shape: BoxShape.circle,
-              ),
-              child: Center(
-                child: Container(
-                  width: 14,
-                  height: 14,
-                  decoration: BoxDecoration(
-                    color: Colors.blue.shade400,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white, width: 3),
-                  ),
+        Expanded(child: StreamBuilder<List<Local>>(
+          stream: locais,
+          builder: (context, snapshot) {
+            final todos = snapshot.data ?? [];
+            final visiveis = filtrarLocais(todos, texto: pesquisa.text);
+            final daCidade = visiveis.where((l) => l.cidade == cidade).length;
+            final selecionado = todos.where((l) => l.id == selecionadoId).firstOrNull;
+            return Stack(children: [
+              FlutterMap(
+                mapController: mapa,
+                options: MapOptions(
+                  initialCenter: centroDe(cidade),
+                  initialZoom: 13,
+                  onTap: (_, _) => setState(() => selecionadoId = null),
+                  onLongPress: (_, ponto) => cadastrarAqui(ponto),
+                  onSecondaryTap: (_, ponto) => cadastrarAqui(ponto), // botão direito no PC
                 ),
+                children: [
+                  TileLayer(urlTemplate: satelite ? _tilesSatelite : _tilesMapa, userAgentPackageName: 'com.example.mapa'),
+                  MarkerLayer(markers: [
+                    if (minhaPosicao != null) Marker(point: minhaPosicao!, width: 24, height: 24, child: Container(decoration: BoxDecoration(color: Colors.blue, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 3), boxShadow: const [BoxShadow(blurRadius: 6, color: Colors.black26)]))),
+                    for (final l in visiveis) Marker(
+                      point: l.posicao, width: 44, height: 44, alignment: Alignment.topCenter,
+                      child: GestureDetector(
+                        onTap: () => setState(() => selecionadoId = l.id),
+                        child: Tooltip(message: l.nome, child: Icon(Icons.location_on, size: l.id == selecionadoId ? 44 : 36, color: l.favorito ? Colors.red.shade700 : Colors.black87, shadows: const [Shadow(blurRadius: 4, color: Colors.black38)])),
+                      ),
+                    ),
+                  ]),
+                  RichAttributionWidget(alignment: AttributionAlignment.bottomLeft, attributions: [TextSourceAttribution(satelite ? 'Esri World Imagery' : 'OpenStreetMap', onTap: () => launchUrl(Uri.parse(satelite ? 'https://www.esri.com' : 'https://www.openstreetmap.org/copyright')))]),
+                ],
               ),
-            ),
-          ),
-          Positioned(right: 12, bottom: 95, child: Column(children: [FloatingActionButton.small(heroTag: 'locate', onPressed: () {}, backgroundColor: Colors.white, foregroundColor: Colors.black87, child: const Icon(Icons.my_location)), const SizedBox(height: 8), FloatingActionButton.small(heroTag: 'layers', onPressed: () {}, backgroundColor: Colors.white, foregroundColor: Colors.black87, child: const Icon(Icons.layers_outlined))])),
-          Positioned(left: 14, right: 14, bottom: 14, child: FilledButton.icon(onPressed: abrirResultados, icon: const Icon(Icons.list_alt), label: Text('Ver ${service.filtrar(cidade: cidade).length} resultados'))),
-        ])),
-        const _BottomNav(selected: 0),
+              if (snapshot.hasError) const Positioned(top: 10, left: 14, right: 14, child: Card(color: Color(0xffffebee), child: Padding(padding: EdgeInsets.all(10), child: Text('Erro ao carregar os locais do banco.')))),
+              if (!snapshot.hasData && !snapshot.hasError) const Positioned(top: 10, left: 0, right: 0, child: Center(child: CircularProgressIndicator())),
+              Positioned(top: 10, left: 14, child: Material(color: Colors.white, elevation: 2, borderRadius: BorderRadius.circular(8), child: const Padding(padding: EdgeInsets.symmetric(horizontal: 8, vertical: 5), child: Text('Segure (ou botão direito) no mapa para cadastrar', style: TextStyle(fontSize: 11))))),
+              Positioned(right: 12, bottom: selecionado == null ? 80 : 190, child: Column(children: [
+                FloatingActionButton.small(heroTag: 'locate', tooltip: 'Minha localização', onPressed: () => executarComMensagem(context, minhaLocalizacao(), 'Você está aqui.'), backgroundColor: Colors.white, foregroundColor: Colors.black87, child: const Icon(Icons.my_location)),
+                const SizedBox(height: 8),
+                FloatingActionButton.small(heroTag: 'layers', tooltip: satelite ? 'Mapa' : 'Satélite', onPressed: () => setState(() => satelite = !satelite), backgroundColor: Colors.white, foregroundColor: Colors.black87, child: Icon(satelite ? Icons.map_outlined : Icons.satellite_alt_outlined)),
+              ])),
+              if (selecionado != null) Positioned(left: 14, right: 14, bottom: 72, child: Material(elevation: 4, borderRadius: BorderRadius.circular(14), child: LocalCard(local: selecionado, onTap: () => abrirDetalhes(selecionado), onEdit: () => showModalBottomSheet(context: context, isScrollControlled: true, showDragHandle: true, builder: (_) => LocalForm(local: selecionado, onSave: (l) => executarComMensagem(context, LocalService().atualizar(l), 'Local atualizado!'))), onDelete: () => excluirLocal(context, selecionado)))),
+              Positioned(left: 14, right: 14, bottom: 14, child: FilledButton.icon(onPressed: abrirResultados, icon: const Icon(Icons.list_alt), label: Text(snapshot.hasData ? 'Ver $daCidade ${daCidade == 1 ? 'resultado' : 'resultados'} em $cidade' : 'Ver resultados'))),
+            ]);
+          },
+        )),
+        NavigationBar(selectedIndex: 0, height: 66, onDestinationSelected: (i) { if (i == 1) abrirResultados(); if (i == 2) abrirResultados(favoritos: true); }, destinations: const [
+          NavigationDestination(icon: Icon(Icons.map_outlined), selectedIcon: Icon(Icons.map), label: 'Mapa'),
+          NavigationDestination(icon: Icon(Icons.list_alt), label: 'Lista'),
+          NavigationDestination(icon: Icon(Icons.favorite_border), label: 'Favoritos'),
+        ]),
       ])),
     );
   }
 }
-
-class _FakeMap extends StatelessWidget { const _FakeMap(); @override Widget build(BuildContext context) => CustomPaint(painter: _MapPainter(), child: const SizedBox.expand()); }
-class _MapPainter extends CustomPainter {
-  @override void paint(Canvas canvas, Size size) {
-    final bg = Paint()..color = const Color(0xffe8ebe9); canvas.drawRect(Offset.zero & size, bg);
-    final blocks = Paint()..color = const Color(0xfff6f7f5)..strokeWidth = 42..style = PaintingStyle.stroke;
-    for (var i = -1; i < 7; i++) { canvas.drawLine(Offset(i * 85.0, 0), Offset(i * 85.0 + 180, size.height), blocks); }
-    for (var i = -1; i < 7; i++) { canvas.drawLine(Offset(0, i * 75.0), Offset(size.width, i * 75.0 + 100), blocks); }
-    final roads = Paint()..color = Colors.white..strokeWidth = 3;
-    canvas.drawLine(Offset(size.width * .1, size.height), Offset(size.width * .8, 0), roads);
-    canvas.drawLine(Offset(0, size.height * .3), Offset(size.width, size.height * .65), roads);
-    canvas.drawLine(Offset(size.width * .3, 0), Offset(size.width * .65, size.height), roads);
-    final park = Paint()..color = const Color(0xffd7e4d2); canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(-30, size.height*.62, size.width*.4, size.height*.32), const Radius.circular(30)), park);
-  }
-  @override bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-class _MapMarker extends StatelessWidget { final Color color; const _MapMarker({required this.color}); @override Widget build(BuildContext context) => Icon(Icons.location_on, color: color, size: 28); }
-class _MapLabel extends StatelessWidget { final String text; final IconData icon; const _MapLabel({required this.text, required this.icon}); @override Widget build(BuildContext context) => Material(color: Colors.white, borderRadius: BorderRadius.circular(8), elevation: 2, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6), child: Row(children: [Icon(icon, size: 15), const SizedBox(width: 5), Text(text, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600))]))); }
-class _BottomNav extends StatelessWidget { final int selected; const _BottomNav({required this.selected}); @override Widget build(BuildContext context) => NavigationBar(selectedIndex: selected, onDestinationSelected: (_) {}, height: 66, destinations: const [NavigationDestination(icon: Icon(Icons.map_outlined), selectedIcon: Icon(Icons.map), label: 'Mapa'), NavigationDestination(icon: Icon(Icons.favorite_border), selectedIcon: Icon(Icons.favorite), label: 'Favoritos'), NavigationDestination(icon: Icon(Icons.person_outline), label: 'Perfil')]); }
